@@ -1,0 +1,9 @@
+numpy
+onnx>=1.13
+onnxruntime_gpu>=1.10.0
+opencv_python==4.5.5.64
+Pillow>=9.4.0
+pytest
+wandb
+tqdm
+tiktoken
