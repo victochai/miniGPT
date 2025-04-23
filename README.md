@@ -4,6 +4,8 @@ This repository contains a simple implementation of a mini GPT model using PyTor
 
 ## Installation
 
+It is recommended to use Docker for installation to ensure a consistent environment. The Dockerfile provided in this repository sets up the necessary dependencies and configurations.
+
 To build the image, run the following command in the terminal:
 
 ```
