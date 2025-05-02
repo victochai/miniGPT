@@ -2,12 +2,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .attention import CausalAttention
-from config import GPTConfig
+from .config import BaseConfig
 
 
 class GPT(nn.Module):
 
-    def __init__(self, config: GPTConfig) -> None:
+    def __init__(self, config: BaseConfig) -> None:
 
         super().__init__()
         self.config = config
@@ -53,16 +53,25 @@ class GPT(nn.Module):
                  idx: torch.Tensor,
                  max_new_tokens: int,
                  temperature: float = 1.0,
-                 top_k: int = None,
+                 num_sentences: int = None,
                  ) -> torch.Tensor:
 
         """
         Args:
             idx (torch.Tensor): Input tensor of shape [B, T]
             max_new_tokens (int): Maximum number of new tokens to generate
+            temperature (float): Temperature for sampling
+            num_sentences (int): Number of sentences to generate
+                - If None, generate until max_new_tokens is reached
         Returns:
             torch.Tensor: Output tensor of shape [B, T + max_new_tokens]
         """
+
+        if num_sentences is not None:
+            dot = self.config.tokenizer.encode(".")[0]  # get the first token ID from the list
+            exclamation = self.config.tokenizer.encode("!")[0]  # get the first token ID from the list
+            question = self.config.tokenizer.encode("?")[0]  # get the first token ID from the list
+            three_dots = self.config.tokenizer.encode("...")[0]  # get the first token ID from the list
 
         for _ in range(max_new_tokens):
 
@@ -76,11 +85,8 @@ class GPT(nn.Module):
             # Higher temperature -> makes softmax flatter. The model is less confident,
             #                                  tokens have more equal probabilities.
             # Temerature = 1.0 means the model behaves normally, softmax-is
+            # Usually low end is approx 0.7, high end is approx 1.2 (Copilot pred)
             logits = logits[:, -1, :] / temperature # [B, vocab_size]
-            # TopK returns the k largest elements of the given input tensor along a given dimension
-            if top_k is not None:
-                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < v[:, [-1]]] = -float('Inf')
             # Apply softmax to convert logits to probabilities
             probs = F.softmax(logits, dim=-1)
             # Sample from the distribution (not greedy sampling)
@@ -88,12 +94,18 @@ class GPT(nn.Module):
             # Append sampled index to the running sequence and continue
             idx = torch.cat((idx, idx_next), dim=1)
 
+            if num_sentences is not None:
+                if idx_next.item() in [dot, exclamation, question, three_dots]:
+                    num_sentences -= 1
+                    if num_sentences == 0:
+                        break
+
         return idx
 
 
 class Block(nn.Module):
 
-    def __init__(self, config: GPTConfig) -> None:
+    def __init__(self, config: BaseConfig) -> None:
 
         super().__init__()
 
@@ -123,20 +135,3 @@ class Block(nn.Module):
         x = x + self.feed_forward(self.layer_norm2(x)) # [B, T, embed_size]
 
         return x
-
-
-if __name__ == "__main__":
-
-    # Example usage
-    config = GPTConfig()
-    print(f"\n\nblock_size: {config.block_size}, embed_size: {config.embed_size}")
-    print(f"vocab_size: {config.vocab_size}, n_layers: {config.n_layers}, n_heads: {config.n_heads}")
-    print(f"device: {config.device}")
-
-    model = GPT(config).to(config.device)
-
-    idx = torch.randint(0, config.vocab_size, (2, config.block_size)).to(config.device)  # [2, block_size]
-    logits, loss = model(idx)
-
-    print("\n\nLogits shape:", logits.shape)  # [2, block_size, vocab_size]
-    print("Loss:", loss)

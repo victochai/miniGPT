@@ -1,6 +1,10 @@
 import torch
 import torch.nn as nn
 
+# This file contains the PositionalEncoding class, which is used in original paper Attention is all you need.
+# It is not used in current implementation of GPT, but it is a good idea to keep it for future reference.
+# In current implementation, we use learned positional embeddings instead of sinusoidal positional embeddings.
+
 
 class PositionalEncoding(nn.Module):
 

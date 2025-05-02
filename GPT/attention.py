@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from config import GPTConfig
+from .config import BaseConfig
 
 
 class CausalAttention(nn.Module):
@@ -11,7 +11,7 @@ class CausalAttention(nn.Module):
     A single head of multi-head causal attention.
     """
 
-    def __init__(self, config: GPTConfig) -> None:
+    def __init__(self, config: BaseConfig) -> None:
 
         super().__init__()
 
@@ -52,15 +52,3 @@ class CausalAttention(nn.Module):
         attention = self.res_dropout(self.W_proj(attention)) # [B, T, embed_size] @ [embed_size, embed_size] --> [B, T, embed_size]
 
         return attention
-
-
-if __name__ == "__main__":
-
-    config = GPTConfig()
-    block_size = config.block_size
-    embed_size = config.embed_size
-    print(f"block_size: {block_size}, embed_size: {embed_size}")
-    x = torch.randn(2, block_size, embed_size)
-    attention = CausalAttention(config=config)
-    output = attention(x)
-    print(output.shape)  # Should be [2, block_size, embed_size]
