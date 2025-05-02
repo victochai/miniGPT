@@ -34,6 +34,8 @@ class GPTConfig():
     batch_size = 8
     checkpoint_path = None # Path to the checkpoint file to load (if any)
     save_path = "./"
+    final_model_name = "checkpoint_final.pt"
+    best_model_name = "checkpoint_best1.pt"
     data_dir = "./data/"
     save_every_checkpoint = False
     wandb = True # Whether to use wandb for logging
@@ -135,7 +137,7 @@ def train(config):
                     best_val_loss = val_loss
                     torch.save(
                         state,
-                        os.path.join(config.save_path, "checkpoint_best1.pt")
+                        os.path.join(config.save_path, config.best_model_name)
                         )
                     print(f"🌟 Saved new BEST checkpoint (val loss: {val_loss:.4f}, step {step})")
                 else:
@@ -155,7 +157,7 @@ def train(config):
     print(f"🚀 Training complete! Final val loss: {val_loss:.4f}")
     torch.save(
         state,
-        os.path.join(config.save_path, "checkpoint_final.pt")
+        os.path.join(config.save_path, config.final_model_name)
         )
     print(f"✅ Final model checkpoint saved!")
 
