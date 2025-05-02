@@ -12,7 +12,7 @@ import numpy as np
 @dataclass
 class GPTConfig():
     ### model configuration
-    tokenizer = tiktoken.get_encoding("gpt2")
+    tokenizer = tiktoken.get_encoding("gpt2") # Used for my current bin files
     vocab_size: int = tokenizer.n_vocab # Should be 50257
     block_size: int = 256 # T; The maximum length of the input sequence (number of tokens)
     n_layers: int = 8
@@ -25,21 +25,32 @@ class GPTConfig():
     res_dropout: float = 0.1
     assert embed_size % n_heads == 0, "Embedding size must be divisible by the number of heads."
     ### training hyperparameters
-    train_iters = 10000
+    train_iters = 100000 # Number of training iterations
     eval_interval = 500 # How often to evaluate the model on the validation set
     eval_iters = 200 # Number of iterations to evaluate the model on the validation set and the training set
-    learning_rate = 1e-4 # 1e-3 --> 0.001
+    max_new_tokens = 50 # Number of new tokens to generate during evaluation
+    eval_sentences = [
+        "The meaning of life is",
+        "In a recent scientific discovery",
+        "Once upon a time, there was a",
+        "The president announced today that",
+        "According to the latest research",
+        "The top 10 reasons why people love",
+        "In a shocking turn of events",
+        "Here is how you can improve your coding skills"
+        ]
+    learning_rate = 1e-4 # 1e-4 --> 0.0001
     weight_decay=1e-5
     batch_size = 8
     checkpoint_path = None # Path to the checkpoint file to load (if any)
     save_path = "./"
     final_model_name = "checkpoint_final.pt"
-    best_model_name = "checkpoint_best1.pt"
+    best_model_name = "checkpoint_best_test.pt"
     data_dir = "./data/"
     save_every_checkpoint = False
     wandb = True # Whether to use wandb for logging
-    wandb_project = "GPT-OpenWebText10percent-2"
-    wandb_run_name = "GPT-OpenWebText10percent-2"
+    wandb_project = "GPT-OpenWebText10percent-test"
+    wandb_run_name = "GPT-OpenWebText10percent-test"
 ### --------------------------------------------------------------------- ###
 
 
@@ -65,13 +76,13 @@ def train(config):
     model = GPT(config).to(config.device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
     print(f"\n\nModel parameters: {sum(p.numel() for p in model.parameters())} \n\n")
-    print(f"Model device: {next(model.parameters()).device} \n\n")
+    print(f"Model device: {next(model.parameters()).device}")
 
     start_iter = 0
 
     if config.checkpoint_path is not None:
         # Load the checkpkoint if it exists
-        print(f"Loading checkpoint from {config.checkpoint_path}")
+        print(f"\n\nLoading checkpoint from {config.checkpoint_path}")
         if not os.path.exists(config.checkpoint_path):
             raise FileNotFoundError(f"Checkpoint file {config.checkpoint_path} not found.")
         checkpoint = torch.load(config.checkpoint_path, map_location=config.device)
@@ -89,6 +100,13 @@ def train(config):
         wb.watch(model, log="all", log_graph=True)
         wb.log({"train_loss": 0, "val_loss": 0})
 
+    if config.eval_sentences is not None:
+        tokenized_sentences = []
+        for sentence in config.eval_sentences:
+            tokens = config.tokenizer.encode(sentence)
+            tokenized_sentences.append(torch.tensor(tokens, dtype=torch.long).unsqueeze(0).to(config.device))
+        print(f"\n\nThe model will generate text during eval time for the following sentences: {config.eval_sentences}")
+
     for step in tqdm(range(start_iter+1, config.train_iters+1), desc="Training", unit="step", leave=False):
 
         X, Y = get_batch("train", config.data_dir, config.block_size, config.batch_size, config.device)
@@ -99,12 +117,16 @@ def train(config):
 
         if step == 1 or step % config.eval_interval == 0:
 
-            losses = estimate_val_loss(model, config)
+            losses, predictions = estimate_val_loss(model, config, tokenized_sentences=tokenized_sentences)
+
             train_loss = losses["train"]
             val_loss = losses["val"]
             if config.wandb:
-                wb.log({"train_loss": train_loss, "val_loss": val_loss}, step=step)
+                wb.log({"train_loss": train_loss, "val_loss": val_loss, "predictions" : predictions}, step=step)
             print(f"Step {step}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+            print(f"Predictions:")
+            for i, sentence in enumerate(config.eval_sentences):
+                print(f"  {i+1}: {predictions[i]}")
 
             if step > 0:
 
@@ -156,7 +178,7 @@ def train(config):
 
 
 @torch.no_grad()
-def estimate_val_loss(model, config):
+def estimate_val_loss(model, config, tokenized_sentences=None):
     out = {}
     model.eval()
     losses = torch.zeros(config.eval_iters)
@@ -167,8 +189,14 @@ def estimate_val_loss(model, config):
             _, loss = model(X, Y)
             losses[i] = loss.item()
         out[s] = losses.mean()
+    if tokenized_sentences is not None:
+        predictions = []
+        for sentence in tokenized_sentences:
+            generated = model.generate(sentence, max_new_tokens=config.max_new_tokens)
+            decoded = config.tokenizer.decode(generated[0].tolist())
+            predictions.append(decoded)
     model.train()
-    return out
+    return out, predictions
 
 
 if __name__ == "__main__":
