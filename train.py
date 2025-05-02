@@ -5,7 +5,6 @@ from GPT import GPT
 from tqdm import tqdm
 import os
 import wandb as wb
-from data.dataset import GPTBinDataset
 import numpy as np
 
 
@@ -67,12 +66,6 @@ def train(config):
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
     print(f"\n\nModel parameters: {sum(p.numel() for p in model.parameters())} \n\n")
     print(f"Model device: {next(model.parameters()).device} \n\n")
-
-    # Load the dataset
-    train_dataset = GPTBinDataset(os.path.join(config.data_dir, "train.bin"), config.block_size, config.device)
-    val_dataset = GPTBinDataset(os.path.join(config.data_dir, "val.bin"), config.block_size, config.device)
-    print(f"Train dataset length: {len(train_dataset)}\n\n")
-    print(f"Val dataset length: {len(val_dataset)}\n\n")
 
     start_iter = 0
 
