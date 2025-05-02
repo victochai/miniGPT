@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import tiktoken
 import torch
-from GPT import GPT
+from GPT import GPT, BaseConfig
 from tqdm import tqdm
 import os
 import wandb as wb
@@ -10,7 +10,7 @@ import numpy as np
 
 ### -------------------------TRAINING CONFIG----------------------------- ###
 @dataclass
-class GPTConfig():
+class GPTConfig(BaseConfig):
     ### model configuration
     tokenizer = tiktoken.get_encoding("gpt2") # Used for my current bin files
     vocab_size: int = tokenizer.n_vocab # Should be 50257
@@ -26,8 +26,10 @@ class GPTConfig():
     assert embed_size % n_heads == 0, "Embedding size must be divisible by the number of heads."
     ### training hyperparameters
     train_iters = 100000 # Number of training iterations
-    eval_interval = 500 # How often to evaluate the model on the validation set
+    eval_interval = 1000 # How often to evaluate the model on the validation set
     eval_iters = 200 # Number of iterations to evaluate the model on the validation set and the training set
+    ## ------ SAMPLING DURING TRAINING ----
+    # If you do NOT want to sample during training, set eval_sentences to None
     max_new_tokens = 50 # Number of new tokens to generate during evaluation
     eval_sentences = [
         "The meaning of life is",
@@ -39,10 +41,13 @@ class GPTConfig():
         "In a shocking turn of events",
         "Here is how you can improve your coding skills"
         ]
+    num_pred_sentences = 5 # Number of sentences to generate during evaluation
+    temperature = 1.0 # Temperature for sampling
+    ## ------------------------------------
     learning_rate = 1e-4 # 1e-4 --> 0.0001
-    weight_decay=1e-5
+    weight_decay = 1e-5
     batch_size = 8
-    checkpoint_path = None # Path to the checkpoint file to load (if any)
+    checkpoint_path = "./checkpoint_best1.pt" # Path to the checkpoint file to load (if any)
     save_path = "./"
     final_model_name = "checkpoint_final.pt"
     best_model_name = "checkpoint_best_test.pt"
@@ -202,7 +207,12 @@ def estimate_val_loss(model, config, tokenized_sentences=None):
     if tokenized_sentences is not None:
         predictions = []
         for sentence in tokenized_sentences:
-            generated = model.generate(sentence, max_new_tokens=config.max_new_tokens)
+            generated = model.generate(
+                sentence,
+                max_new_tokens=config.max_new_tokens,
+                temperature=config.temperature,
+                num_sentences=config.num_pred_sentences
+                )
             decoded = config.tokenizer.decode(generated[0].tolist())
             predictions.append(decoded)
     model.train()
