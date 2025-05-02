@@ -1,11 +1,11 @@
 import numpy as np
 import torch
 
-# This scrip containes:
+# This script works with train.txt, val.txt, and test.txt files. I do not use it currently as I use binary files instead.
+# This script contains two functions:
 # - stream_tokens: A generator that reads a text file line by line and yields tokens when the buffer reaches a certain size.
 # - get_inf_batch: A generator that reads a text file line by line and yields batches of tokens of size (batch_size, block_size).
 # I wrote this script to avoid loading the entire dataset into memory at once, which is not feasible for large datasets.
-# Curently not used, but saved for future reference.
 
 def stream_tokens(filename, tokenizer, min_chunk_chars):
     """
