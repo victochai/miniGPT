@@ -5,8 +5,8 @@ from GPT import GPT
 from tqdm import tqdm
 import os
 import wandb as wb
-from torch.utils.data import DataLoader
 from data.dataset import GPTBinDataset
+import numpy as np
 
 
 ### -------------------------TRAINING CONFIG----------------------------- ###
@@ -15,7 +15,7 @@ class GPTConfig():
     ### model configuration
     tokenizer = tiktoken.get_encoding("gpt2")
     vocab_size: int = tokenizer.n_vocab # Should be 50257
-    block_size: int = 32 # T; The maximum length of the input sequence (number of tokens)
+    block_size: int = 256 # T; The maximum length of the input sequence (number of tokens)
     n_layers: int = 8
     n_heads: int = 8 # Should be config.embed_size % config.n_heads == 0
     embed_size: int = 256
@@ -26,21 +26,37 @@ class GPTConfig():
     res_dropout: float = 0.1
     assert embed_size % n_heads == 0, "Embedding size must be divisible by the number of heads."
     ### training hyperparameters
-    train_iters = 1000
-    eval_interval = 500
-    eval_iters = 200
+    train_iters = 10000
+    eval_interval = 500 # How often to evaluate the model on the validation set
+    eval_iters = 200 # Number of iterations to evaluate the model on the validation set and the training set
     learning_rate = 1e-4 # 1e-3 --> 0.001
     weight_decay=1e-5
-    batch_size = 16
+    batch_size = 8
     checkpoint_path = None # Path to the checkpoint file to load (if any)
     save_path = "./"
     data_dir = "./data/"
     save_every_checkpoint = False
-    min_chunk_chars = 5000 # Minimum number of characters to read from the file at once
     wandb = True # Whether to use wandb for logging
-    wandb_project = "GPT-OpenWebText10percent"
-    wandb_run_name = "GPT-OpenWebText10percent-1"
+    wandb_project = "GPT-OpenWebText10percent-2"
+    wandb_run_name = "GPT-OpenWebText10percent-2"
 ### --------------------------------------------------------------------- ###
+
+
+def get_batch(split, data_dir, block_size, batch_size, device):
+    if split == 'train':
+        data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
+    else:
+        data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
+    ix = torch.randint((len(data)-1) - block_size, (batch_size,))
+    x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
+    y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
+    if device == 'cuda':
+        # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
+        # x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
+        x, y = x.to(device), y.to(device)
+    else:
+        x, y = x.to(device), y.to(device)
+    return x, y
 
 
 def train(config):
@@ -56,9 +72,6 @@ def train(config):
     print(f"Train dataset length: {len(train_dataset)}\n\n")
     print(f"Val dataset length: {len(val_dataset)}\n\n")
 
-    # Create the dataloaders
-    train_dataloader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=4)
-    val_dataloader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=4)
     start_iter = 0
 
     if config.checkpoint_path is not None:
@@ -70,7 +83,7 @@ def train(config):
         model.load_state_dict(checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])
         val_loss = checkpoint["val_loss"]
-        start_iter = checkpoint["step"] + 1
+        start_iter = checkpoint["step"]
         print(f"✅ Resumed training from checkpoint (Step {start_iter})")
 
     best_val_loss = float("inf")
@@ -81,17 +94,17 @@ def train(config):
         wb.watch(model, log="all", log_graph=True)
         wb.log({"train_loss": 0, "val_loss": 0})
 
-    for step in tqdm(range(start_iter, config.train_iters), desc="Training", unit="step", leave=False):
+    for step in tqdm(range(start_iter+1, config.train_iters+1), desc="Training", unit="step", leave=False):
 
-        X, Y = next(iter(train_dataloader))
+        X, Y = get_batch("train", config.data_dir, config.block_size, config.batch_size, config.device)
         optimizer.zero_grad(set_to_none=True)
         logits, loss = model(X, Y)
         loss.backward()
         optimizer.step()
 
-        if step % config.eval_interval == 0:
+        if step == 1 or step % config.eval_interval == 0:
 
-            losses = estimate_val_loss(model, config, val_dataloader)
+            losses = estimate_val_loss(model, config)
             train_loss = losses["train"]
             val_loss = losses["val"]
             if config.wandb:
@@ -128,6 +141,9 @@ def train(config):
                 else:
                     print(f"❌ No improvement in val loss, not saving checkpoint")
 
+        if step >= config.train_iters:
+            break
+
     state = {
             "model": model.state_dict(),
             "optimizer": optimizer.state_dict(),
@@ -145,18 +161,14 @@ def train(config):
 
 
 @torch.no_grad()
-def estimate_val_loss(model, config, val_dataloader, train_dataloader):
+def estimate_val_loss(model, config):
     out = {}
     model.eval()
     losses = torch.zeros(config.eval_iters)
     split = ["train", "val"]
     for s in split:
-        if s == "train":
-            dataloader = train_dataloader
-        else:
-            dataloader = val_dataloader
         for i in range(config.eval_iters):
-            X, Y = next(iter(dataloader))
+            X, Y = get_batch(s, config.data_dir, config.block_size, config.batch_size, config.device)
             _, loss = model(X, Y)
             losses[i] = loss.item()
         out[s] = losses.mean()
