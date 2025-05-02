@@ -18,8 +18,8 @@ class GPTConfig(BaseConfig):
     n_layers: int = 8
     n_heads: int = 8 # Should be config.embed_size % config.n_heads == 0
     embed_size: int = 256
-    dropout: float = 0.0
     device: torch.device = field(default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+    dropout: float = 0.0
     ffn_dropout: float = 0.1
     att_dropout: float = 0.1
     res_dropout: float = 0.1
