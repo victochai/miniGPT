@@ -75,14 +75,14 @@ def train(config):
 
     model = GPT(config).to(config.device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
-    print(f"\n\nModel parameters: {sum(p.numel() for p in model.parameters())} \n\n")
-    print(f"Model device: {next(model.parameters()).device}")
+    print(f"\nModel parameters: {sum(p.numel() for p in model.parameters())}")
+    print(f"Model device: {next(model.parameters()).device}\n")
 
     start_iter = 0
 
     if config.checkpoint_path is not None:
         # Load the checkpkoint if it exists
-        print(f"\n\nLoading checkpoint from {config.checkpoint_path}")
+        print(f"\nLoading checkpoint from {config.checkpoint_path}")
         if not os.path.exists(config.checkpoint_path):
             raise FileNotFoundError(f"Checkpoint file {config.checkpoint_path} not found.")
         checkpoint = torch.load(config.checkpoint_path, map_location=config.device)
@@ -90,7 +90,7 @@ def train(config):
         optimizer.load_state_dict(checkpoint["optimizer"])
         val_loss = checkpoint["val_loss"]
         start_iter = checkpoint["step"]
-        print(f"✅ Resumed training from checkpoint (Step {start_iter})")
+        print(f"✅ Resumed training from checkpoint (Step {start_iter})\n")
 
     best_val_loss = float("inf")
 
@@ -98,16 +98,19 @@ def train(config):
         wb.init(project=config.wandb_project, name=config.wandb_run_name)
         wb.config.update(config)
         wb.watch(model, log="all", log_graph=True)
-        wb.log({"train_loss": 0, "val_loss": 0})
+        # wb.log({"train_loss": 0, "val_loss": 0})
 
     if config.eval_sentences is not None:
         tokenized_sentences = []
         for sentence in config.eval_sentences:
             tokens = config.tokenizer.encode(sentence)
             tokenized_sentences.append(torch.tensor(tokens, dtype=torch.long).unsqueeze(0).to(config.device))
-        print(f"\n\nThe model will generate text during eval time for the following sentences: {config.eval_sentences}")
+        print(f"\nThe model will generate text during eval time for the following sentences:")
+        for i, sentence in enumerate(config.eval_sentences):
+            print(f"  {i+1}: {sentence}")
+        print(f"\n")
 
-    for step in tqdm(range(start_iter+1, config.train_iters+1), desc="Training", unit="step", leave=False):
+    for step in tqdm(range(start_iter, config.train_iters), desc="Training", unit="step", leave=False):
 
         X, Y = get_batch("train", config.data_dir, config.block_size, config.batch_size, config.device)
         optimizer.zero_grad(set_to_none=True)
@@ -115,14 +118,20 @@ def train(config):
         loss.backward()
         optimizer.step()
 
-        if step == 1 or step % config.eval_interval == 0:
+        if step % config.eval_interval == 0:
 
             losses, predictions = estimate_val_loss(model, config, tokenized_sentences=tokenized_sentences)
+
+            if predictions is not None:
+                table = wb.Table(columns=["index", "prediction"])
+                for i, pred in enumerate(predictions):
+                    table.add_data(i, pred)
+                wb.log({"predictions": table}, step=step)
 
             train_loss = losses["train"]
             val_loss = losses["val"]
             if config.wandb:
-                wb.log({"train_loss": train_loss, "val_loss": val_loss, "predictions" : predictions}, step=step)
+                wb.log({"train_loss": train_loss, "val_loss": val_loss}, step=step)
             print(f"Step {step}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
             print(f"Predictions:")
             for i, sentence in enumerate(config.eval_sentences):
@@ -189,6 +198,7 @@ def estimate_val_loss(model, config, tokenized_sentences=None):
             _, loss = model(X, Y)
             losses[i] = loss.item()
         out[s] = losses.mean()
+    predictions = None
     if tokenized_sentences is not None:
         predictions = []
         for sentence in tokenized_sentences:
