@@ -2,7 +2,7 @@ import torch
 from GPT import GPT
 from train import GPTConfig
 import argparse
-import os
+import tiktoken
 
 
 def main():
@@ -24,14 +24,29 @@ def main():
 
     config = GPTConfig()
     model = GPT(config).to(args.device)
+    tokenizer = tiktoken.get_encoding(config.tokenizer)
 
     checkpoint = torch.load(args.checkpoint, map_location="cuda", weights_only=True)
     model.load_state_dict(checkpoint["model"])
     model.eval()
 
-    tokens = config.tokenizer.encode(args.text)
+    tokens = tokenizer.encode(args.text)
     tokens = torch.tensor(tokens, dtype=torch.long).unsqueeze(0).to(args.device)  # Add batch dimension and move to device
-    generate = model.generate(tokens, max_new_tokens=args.max_new_tokens, temperature=args.temperature, num_sentences=args.num_sentences)
+
+    if args.num_sentences is not None:
+        eos_tokens = []
+        eos_tokens.append(tokenizer.encode(".")[0])
+        eos_tokens.append(tokenizer.encode("!")[0])
+        eos_tokens.append(tokenizer.encode("?")[0])
+        eos_tokens.append(tokenizer.encode("...")[0])
+
+    generate = model.generate(
+        tokens,
+        max_new_tokens=args.max_new_tokens,
+        temperature=args.temperature,
+        num_sentences=args.num_sentences,
+        eos_tokens=eos_tokens if args.num_sentences is not None else None
+        )
 
     print(f"\nUsing checkpoint: {args.checkpoint}")
     print(f"Using device: {args.device}")
@@ -40,7 +55,7 @@ def main():
         print(f"Generating {args.num_sentences} sentences...")
     print(f"Generating maximum {args.max_new_tokens} new tokens...\n\n")
     print("\nGenerated text:")
-    print(config.tokenizer.decode(generate[0].tolist()))
+    print(tokenizer.decode(generate[0].tolist()))
     print("\n")
 
 

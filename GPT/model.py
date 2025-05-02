@@ -54,6 +54,7 @@ class GPT(nn.Module):
                  max_new_tokens: int,
                  temperature: float = 1.0,
                  num_sentences: int = None,
+                 eos_tokens: list = None,
                  ) -> torch.Tensor:
 
         """
@@ -63,15 +64,10 @@ class GPT(nn.Module):
             temperature (float): Temperature for sampling
             num_sentences (int): Number of sentences to generate
                 - If None, generate until max_new_tokens is reached
+            eos_tokens (list): List of end-of-sentence tokens if num_sentences is not None
         Returns:
             torch.Tensor: Output tensor of shape [B, T + max_new_tokens]
         """
-
-        if num_sentences is not None:
-            dot = self.config.tokenizer.encode(".")[0]  # get the first token ID from the list
-            exclamation = self.config.tokenizer.encode("!")[0]  # get the first token ID from the list
-            question = self.config.tokenizer.encode("?")[0]  # get the first token ID from the list
-            three_dots = self.config.tokenizer.encode("...")[0]  # get the first token ID from the list
 
         for _ in range(max_new_tokens):
 
@@ -95,7 +91,7 @@ class GPT(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1)
 
             if num_sentences is not None:
-                if idx_next.item() in [dot, exclamation, question, three_dots]:
+                if idx_next.item() in eos_tokens:
                     num_sentences -= 1
                     if num_sentences == 0:
                         break

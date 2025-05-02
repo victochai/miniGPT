@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import tiktoken
 import torch
 from GPT import GPT, BaseConfig
@@ -12,18 +12,17 @@ import numpy as np
 @dataclass
 class GPTConfig(BaseConfig):
     ### model configuration
-    tokenizer = tiktoken.get_encoding("gpt2") # Used for my current bin files
-    vocab_size: int = tokenizer.n_vocab # Should be 50257
+    tokenizer: str = "gpt2" # The tokenizer to use (e.g., "gpt2", "gpt2-medium", "gpt2-large")
+    vocab_size: int = field(default_factory=lambda: tiktoken.get_encoding("gpt2").n_vocab) # Size of the vocabulary
     block_size: int = 256 # T; The maximum length of the input sequence (number of tokens)
     n_layers: int = 8
     n_heads: int = 8 # Should be config.embed_size % config.n_heads == 0
     embed_size: int = 256
     dropout: float = 0.0
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device: torch.device = field(default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu"))
     ffn_dropout: float = 0.1
     att_dropout: float = 0.1
     res_dropout: float = 0.1
-    assert embed_size % n_heads == 0, "Embedding size must be divisible by the number of heads."
     ### training hyperparameters
     train_iters = 100000 # Number of training iterations
     eval_interval = 1000 # How often to evaluate the model on the validation set
@@ -31,16 +30,16 @@ class GPTConfig(BaseConfig):
     ## ------ SAMPLING DURING TRAINING ----
     # If you do NOT want to sample during training, set eval_sentences to None
     max_new_tokens = 50 # Number of new tokens to generate during evaluation
-    eval_sentences = [
+    eval_sentences: list = field(default_factory=lambda: [
         "The meaning of life is",
         "In a recent scientific discovery",
         "Once upon a time, there was a",
         "The president announced today that",
-        "According to the latest research",
-        "The top 10 reasons why people love",
+        "According to the latest research,",
+        "The top 10 reasons why people love:",
         "In a shocking turn of events",
-        "Here is how you can improve your coding skills"
-        ]
+        "Here is how you can improve your coding skills:"
+    ])
     num_pred_sentences = 5 # Number of sentences to generate during evaluation
     temperature = 1.0 # Temperature for sampling
     ## ------------------------------------
@@ -56,6 +55,10 @@ class GPTConfig(BaseConfig):
     wandb = True # Whether to use wandb for logging
     wandb_project = "GPT-OpenWebText10percent-test"
     wandb_run_name = "GPT-OpenWebText10percent-test"
+
+    def __post_init__(self):
+        assert self.embed_size % self.n_heads == 0, "Embedding size must be divisible by the number of heads."
+
 ### --------------------------------------------------------------------- ###
 
 
@@ -82,6 +85,7 @@ def train(config):
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
     print(f"\nModel parameters: {sum(p.numel() for p in model.parameters())}")
     print(f"Model device: {next(model.parameters()).device}\n")
+    tokenizer = tiktoken.get_encoding(config.tokenizer)
 
     start_iter = 0
 
@@ -108,7 +112,7 @@ def train(config):
     if config.eval_sentences is not None:
         tokenized_sentences = []
         for sentence in config.eval_sentences:
-            tokens = config.tokenizer.encode(sentence)
+            tokens = tokenizer.encode(sentence)
             tokenized_sentences.append(torch.tensor(tokens, dtype=torch.long).unsqueeze(0).to(config.device))
         print(f"\nThe model will generate text during eval time for the following sentences:")
         for i, sentence in enumerate(config.eval_sentences):
@@ -125,7 +129,15 @@ def train(config):
 
         if step % config.eval_interval == 0:
 
-            losses, predictions = estimate_val_loss(model, config, tokenized_sentences=tokenized_sentences)
+            eos_tokens = None
+            if config.num_pred_sentences is not None: # Do we have max of pred sentences to generate?
+                eos_tokens = []
+                eos_tokens.append(tokenizer.encode(".")[0])
+                eos_tokens.append(tokenizer.encode("!")[0])
+                eos_tokens.append(tokenizer.encode("?")[0])
+                eos_tokens.append(tokenizer.encode("...")[0])
+
+            losses, predictions = estimate_val_loss(model, config, tokenizer, tokenized_sentences=tokenized_sentences, eos_tokens=eos_tokens)
 
             if predictions is not None:
                 table = wb.Table(columns=["index", "prediction"])
@@ -192,7 +204,9 @@ def train(config):
 
 
 @torch.no_grad()
-def estimate_val_loss(model, config, tokenized_sentences=None):
+def estimate_val_loss(model, config, tokenizer, tokenized_sentences=None, eos_tokens=None):
+
+    # Generate losses for train and val sets
     out = {}
     model.eval()
     losses = torch.zeros(config.eval_iters)
@@ -203,19 +217,23 @@ def estimate_val_loss(model, config, tokenized_sentences=None):
             _, loss = model(X, Y)
             losses[i] = loss.item()
         out[s] = losses.mean()
+
+    # Generate predictions for the eval sentences
     predictions = None
-    if tokenized_sentences is not None:
+    if tokenized_sentences is not None: # Are we generating predictions?
         predictions = []
         for sentence in tokenized_sentences:
             generated = model.generate(
                 sentence,
                 max_new_tokens=config.max_new_tokens,
                 temperature=config.temperature,
-                num_sentences=config.num_pred_sentences
+                num_sentences=config.num_pred_sentences,
+                eos_tokens=eos_tokens
                 )
-            decoded = config.tokenizer.decode(generated[0].tolist())
+            decoded = tokenizer.decode(generated[0].tolist())
             predictions.append(decoded)
     model.train()
+
     return out, predictions
 
 
