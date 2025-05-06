@@ -16,6 +16,7 @@ class GPT(nn.Module):
         self.blocks = nn.ModuleList(
             [Block(config) for _ in range(config.n_layers)])
         self.lm_head = nn.Linear(config.embed_size, config.vocab_size)
+        self.lm_head.weight = self.token_embedding_table.weight # Tie weights
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self,
