@@ -6,6 +6,7 @@ from tqdm import tqdm
 import os
 import wandb as wb
 import numpy as np
+from transformers import get_linear_schedule_with_warmup
 
 
 ### -------------------------TRAINING CONFIG----------------------------- ###
@@ -46,19 +47,18 @@ class GPTConfig(BaseConfig):
     learning_rate = 1e-4 # 1e-4 --> 0.0001
     weight_decay = 1e-5
     batch_size = 8
-    checkpoint_path = "./checkpoint_best1.pt" # Path to the checkpoint file to load (if any)
+    checkpoint_path = None
     save_path = "./"
-    final_model_name = "checkpoint_final.pt"
-    best_model_name = "checkpoint_best_test.pt"
+    final_model_name = "checkpoint_fina_NEW.pt"
+    best_model_name = "checkpoint_best_NEW.pt"
     data_dir = "./data/"
     save_every_checkpoint = False
     wandb = True # Whether to use wandb for logging
-    wandb_project = "GPT-OpenWebText10percent-test"
-    wandb_run_name = "GPT-OpenWebText10percent-test"
+    wandb_project = "GPT-OpenWebText10percent-NEW"
+    wandb_run_name = "GPT-OpenWebText10percent-NEW"
 
     def __post_init__(self):
         assert self.embed_size % self.n_heads == 0, "Embedding size must be divisible by the number of heads."
-
 ### --------------------------------------------------------------------- ###
 
 
@@ -83,6 +83,11 @@ def train(config):
 
     model = GPT(config).to(config.device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps = 5000,
+        num_training_steps = config.train_iters,
+    )
     print(f"\nModel parameters: {sum(p.numel() for p in model.parameters())}")
     print(f"Model device: {next(model.parameters()).device}\n")
     tokenizer = tiktoken.get_encoding(config.tokenizer)
@@ -97,6 +102,8 @@ def train(config):
         checkpoint = torch.load(config.checkpoint_path, map_location=config.device)
         model.load_state_dict(checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])
+        if 'scheduler_state_dict' in checkpoint:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         val_loss = checkpoint["val_loss"]
         start_iter = checkpoint["step"]
         print(f"✅ Resumed training from checkpoint (Step {start_iter})\n")
@@ -126,6 +133,7 @@ def train(config):
         logits, loss = model(X, Y)
         loss.backward()
         optimizer.step()
+        scheduler.step()
 
         if step % config.eval_interval == 0:
 
@@ -159,6 +167,7 @@ def train(config):
                 state = {
                         "model": model.state_dict(),
                         "optimizer": optimizer.state_dict(),
+                        'scheduler_state_dict': scheduler.state_dict(),
                         "step": step,
                         "val_loss": val_loss,
                         "best_val_loss": best_val_loss
@@ -190,6 +199,7 @@ def train(config):
     state = {
             "model": model.state_dict(),
             "optimizer": optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
             "step": step,
             "val_loss": val_loss,
             "best_val_loss": best_val_loss
