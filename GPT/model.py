@@ -109,7 +109,7 @@ class Block(nn.Module):
         self.attention = CausalAttention(config)
         self.feed_forward = nn.Sequential(
             nn.Linear(config.embed_size, config.embed_size * 4),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(config.embed_size * 4, config.embed_size),
             nn.Dropout(config.ffn_dropout)
         )
